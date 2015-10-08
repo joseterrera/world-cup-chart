@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="http://d3js.org/d3.v3.min.js"></script>
+    <style>
+      circle {
+        fill: orange;
+        stroke: black;
+        stroke-width: 0.7;
+        opacity: 0.7;
+      }
+      h2 {
+        text-align: center;
+      }
+
+      div.years_buttons {
+        position: fixed;
+        top: 5px;
+        left: 50px;
+      }
+
+      div.years_buttons div {
+        background-color: rgb(251, 201, 127);
+        padding: 3px;
+        margin: 7px;
+      }
+
+    </style>
+     <script type="text/javascript">  
+      function draw(geo_data) {
+        "use strict";
+        var margin = 75,
+            width = 1400 - margin,
+            height = 600 - margin;
+
+             d3.select("body")
+               .append("h2")
+               .text("World Cup ");
+
+        var svg = d3.select("body")
+            .append("svg")
+            .attr("width", width + margin)
+            .attr("height", height + margin)
+            .append('g')
+            .attr('class', 'map');
+
+
+          //a projection will transform the data/domain into pixel/range. In a scatterplot we use .scale(), in a map we use .mercator() which adapts the map to the data. //it goes from a spherical coordinate to a cartesian plane
+        var projection = d3.geo.mercator()
+                               .scale(140)
+                               .translate([width / 2, height / 1.2]);
+        //geo.path translates all the geojson coordinates into svg , and projection sets it to the specified projection above. 
+        //the path generator takes the projected 2d plane and formats it for svg  using the projection defined
+        var path = d3.geo.path().projection(projection);
+        //use this path to create the map:
+        var map = svg.selectAll('path')
+                     .data(geo_data.features)
+                     .enter()
+                     .append('path')
+                     .attr('d', path)
+                     .style('fill', 'lightBlue')
+                     .style('stroke', 'black')
+                     .style('stroke-width', 0.5);
+
+        
+        function plot_points(data) {   
+            //leaves refers to nested or hierarchical set of our data, the agg_year function will be called in the rollup accessor function which will be organized by the group in the key accessor
+            function agg_year(leaves) {
+                //sum takes an array and an accessor function that customizes the behavior of it.
+                var total = d3.sum(leaves, function(d) {
+                    return d['attendance'];
+                });
+                //map transforms every element in an array and returns an array back. In this case, the projection will transform the lat and lng into a pixel value.
+                var coords = leaves.map(function(d) {
+                    return projection([+d.long, +d.lat]);
+                });
+                //whatever gets returned when using mean gets averaged and stored as a single value.
+                var center_x = d3.mean(coords, function(d) {
+                    return d[0];
+                });
+                var center_y = d3.mean(coords, function(d) {
+                    return d[1];
+                });
+                //d3.set([array]) constructs a new set. If array is specified, it adds the given array the string of values to the returned set.
+                var teams = d3.set();
+                //forEach runs an accessor function on each of the elements of the array.
+                leaves.forEach(function(d) {
+                    teams.add(d['team1']);
+                    teams.add(d['team2']);
+                });
+
+                return {
+                  'attendance' : total,
+                  'x' : center_x,
+                  'y' : center_y,
+                  //we pass teams to the return object.
+                  'teams' : teams.values()
+                };
+            } //end of agg_year
+            //the nested function will group our games in the year they were played
+            var nested = d3.nest()
+            //the key is what will be grouping on
+            //the resulting array will have an entry for each date, in other words, it specifies how we wanna group our data. 
+                           .key(function(d) {
+                              return d['date'].getUTCFullYear();
+                           })
+          //takes individual values and adds them.
+                           .rollup(agg_year)
+                           .entries(data);
+
+            var attendance_max = d3.max(nested, function(d) {
+                return d.values['attendance'];
+            });
+            //sqrt()constructs a new power scale with domain and range specified.
+            var radius = d3.scale.sqrt()
+                           .domain([0, attendance_max])
+                           .range([0, 15]);
+
+             //this is an accessor function that we are calling below as we are updating our data. D3 will bind this return value to the element selected above(the circle). The nested grouping already sorted and returned the year of the wolrd cup. So key_func will return the year of hte world cup of the nested object.       
+            function key_func(d) {
+                return d['key'];
+            }
+
+            svg.append('g')
+               .attr("class", "bubble")
+               .selectAll("circle")
+               //sort() method sorts the elements of an array and returns the array 
+               //in this case, it will make sure it will correctly sort the data before binding it. So, in this function, whatever is greater (a or b) is returned first. Examples of this on mdn.
+               .data(nested.sort(function(a, b) { 
+                  return b.values['attendance'] - a.values['attendance'];
+               }), key_func)
+               .enter()
+               .append("circle")
+               .attr('cx', function(d) { return d.values['x']; })
+               .attr('cy', function(d) { return d.values['y']; })
+               .attr('r', function(d) {
+                    return radius(d.values['attendance']);
+               })
+          //our update function takes a simple year as an argument that we need to filter. It will bind  new daya, remove circles, add any new circles and filter countries so that only countries that had a team during world cup show. 
+          function update(year) {
+            //filter returns a new selection with only true values. 
+              var filtered = nested.filter(function(d) {
+                //this return will convert the string back into a date, pull the year out and compare it to the argument.
+                  return new Date(d['key']).getUTCFullYear() === year;
+              });
+
+                d3.select("h2")
+                .text("World Cup " + year);
+
+              //select all circles and re-bind all our data
+              var circles = svg.selectAll('circle')
+                               .data(filtered, key_func);
+
+              circles.exit().remove();
+
+              circles.enter()
+                     .append("circle")
+                     .attr('cx', function(d) { return d.values['x']; })
+                     .attr('cy', function(d) { return d.values['y']; })
+                     .attr('r', function(d) {
+                        return radius(d.values['attendance']);
+                     });
+                     debugger;
+              //var countries will give us a list of the countries that participated in the given year that we are updating.
+              var countries = filtered[0].values['teams'];
+
+
+              function update_countries(d) {
+                //if a country is not in a given year return white, if it is return lightblue. indexOf if the country is not in the array it returns -1.
+                  if(countries.indexOf(d.properties.name) !== -1) {
+                      return "lightBlue";
+                  } else {
+                      return 'white';
+                  }
+              } //end of update countries
+
+              svg.selectAll('path')
+                 .transition()
+                 .duration(500)
+                 .style('fill', update_countries)
+                 .style('stroke', update_countries);
+
+          }; //end of update
+         
+          var years = [];
+
+          for(var i = 1930; i < 2015; i += 4) {
+            if(i !== 1942 && i !== 1946) {
+              years.push(i);
+            };
+          }
+
+          var year_idx = 0;
+
+          var year_interval = setInterval(function() {
+            update(years[year_idx]);
+
+            year_idx++;
+
+            if(year_idx >= years.length) {
+                clearInterval(year_interval);
+
+                //add buttons that correspond to all the years of  the world cup. we place the buttons inside the if statement, so that when the year_interval is done, the buttons only then appear. 
+                var buttons = d3.select('body')
+                                 .append('div')
+                                 .attr('class', 'years_buttons')
+                                 .selectAll('div')
+                                 .data(years)
+                                 .enter()
+                                 .append('div')
+                                 .text(function(d){return d;});
+
+                //add a click event to enable some interaction.
+                buttons.on('click', function(d){
+                  //to deactivate buttons that we are no longer being clicked on, first we set them to their initial style
+                  d3.select('.years_buttons')
+                  .selectAll('div')
+                  .transition()
+                  .duration(500)
+                  .style("color", "black")
+                  .style("background", "rgb(251, 201, 127)");
+
+
+                  //this in this-case represents the element that was clicked: the html button.
+                  d3.select(this)
+                  .transition()
+                  .duration(500)
+                  .style('background', 'lightBlue')
+                  .style('color', 'white')
+                  //when a user clicks a button we want to update d. 
+                  update(d);
+                })
+            }
+          }, 1000);
+
+      } //end of plot_points
+
+      var format = d3.time.format("%d-%m-%Y (%H:%M h)");
+       //first d3.json gets called, and then after draw function is called, d3.tsv is callled.
+          //tsv: tab separated values
+          //d3.tsv(url[,accessor][,callback]);
+          //order in which they are called:
+          //1. d3.json (.json file)
+          //2. draw 
+          //3. d3.tsv  (.tsv file)
+          //4. plot_points
+          // inside the draw function, we've got nested d3.tsv and plot_points
+      d3.tsv("world_cup_geo.tsv", function(d) {
+        d['attendance'] = +d['attendance'];
+        d['date'] = format.parse(d['date']);
+        return d;
+      }, plot_points);
+    };
+    </script>
+  </head>
+<body>
+  <script type="text/javascript">
+   // load GeoJSON file with data and call draw   
+    d3.json("world_countries.json", draw);
+  </script>
+</body>
+</html>
